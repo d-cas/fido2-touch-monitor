@@ -1,4 +1,4 @@
-module github.com/d-cas/fido2-touch-monitor
+module github.com/d-cas/lobo
 
 go 1.25.3
 
