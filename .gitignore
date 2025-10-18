@@ -1,0 +1,27 @@
+# Binaries
+fido2-touch-monitor
+main
+
+# Local config
+settings.local.json
+*.local.json
+
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+go.work.sum
