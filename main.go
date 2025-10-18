@@ -12,6 +12,8 @@ import (
     "github.com/keys-pub/go-libfido2"
 )
 
+const version = "0.1.0"
+
 var (
     titleStyle = lipgloss.NewStyle().
         Bold(true).
@@ -249,7 +251,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) View() string {
-    s := titleStyle.Render("🔑 FIDO2 Touch Timing Monitor") + "\n\n"
+    s := titleStyle.Render("🔑 FIDO2 Touch Monitor v" + version) + "\n\n"
 
     switch m.state {
     case stateInit:
