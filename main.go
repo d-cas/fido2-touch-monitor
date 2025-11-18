@@ -5,6 +5,7 @@ import (
     "crypto/sha256"
     "fmt"
     "os"
+    "strings"
 
     tea "github.com/charmbracelet/bubbletea"
     "github.com/charmbracelet/lipgloss"
@@ -201,6 +202,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
         return m, nil
 
     case errorMsg:
+        // Check if it's a "no credentials" error (key was swapped)
+        if strings.Contains(msg.err.Error(), "no credentials") {
+            // Key was swapped - reset and re-register
+            m.registered = false
+            m.state = stateDeviceCheck
+            return m, findDevice
+        }
         m.state = stateError
         m.err = msg.err
         return m, nil
