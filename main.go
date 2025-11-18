@@ -5,31 +5,21 @@ import (
     "crypto/sha256"
     "fmt"
     "os"
-    "time"
+    "strings"
 
     tea "github.com/charmbracelet/bubbletea"
     "github.com/charmbracelet/lipgloss"
     "github.com/keys-pub/go-libfido2"
 )
 
-const version = "0.1.0"
 
 var (
-    titleStyle = lipgloss.NewStyle().
-        Bold(true).
-        Foreground(lipgloss.Color("86")).
-        MarginBottom(1)
-
     errorStyle = lipgloss.NewStyle().
         Foreground(lipgloss.Color("196")).
         Bold(true)
 
     successStyle = lipgloss.NewStyle().
         Foreground(lipgloss.Color("46")).
-        Bold(true)
-
-    warningStyle = lipgloss.NewStyle().
-        Foreground(lipgloss.Color("226")).
         Bold(true)
 
     normalStyle = lipgloss.NewStyle().
@@ -49,16 +39,12 @@ const (
 )
 
 type model struct {
-    state         state
-    devicePath    string
-    logs          []string
-    err           error
-    touchStart    time.Time
-    touchDuration time.Duration
-    registered    bool
-    testCount     int
-    pin           string
-    pinInput      string
+    state      state
+    devicePath string
+    err        error
+    registered bool
+    pin        string
+    pinInput   string
 }
 
 type deviceFoundMsg struct {
@@ -67,9 +53,7 @@ type deviceFoundMsg struct {
 
 type registrationSuccessMsg struct{}
 
-type touchSuccessMsg struct {
-    duration time.Duration
-}
+type touchSuccessMsg struct{}
 
 type errorMsg struct {
     err error
@@ -78,7 +62,6 @@ type errorMsg struct {
 func initialModel() model {
     return model{
         state: stateInit,
-        logs:  []string{},
     }
 }
 
@@ -150,8 +133,6 @@ func waitForTouch(devicePath string, pin string) tea.Cmd {
         rand.Read(challenge)
         cdh := sha256.Sum256(challenge)
 
-        start := time.Now()
-
         _, err = device.Assertion(
             "localhost",
             cdh[:],
@@ -162,13 +143,11 @@ func waitForTouch(devicePath string, pin string) tea.Cmd {
             },
         )
 
-        duration := time.Since(start)
-
         if err != nil {
             return errorMsg{err: err}
         }
 
-        return touchSuccessMsg{duration: duration}
+        return touchSuccessMsg{}
     }
 }
 
@@ -181,27 +160,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
         case "enter", " ":
             if m.state == stateInit {
                 m.state = stateDeviceCheck
-                m.logs = append(m.logs, "[System] Starting FIDO2 test...")
                 return m, findDevice
             } else if m.state == statePINEntry {
                 m.pin = m.pinInput
-                if m.pin == "" {
-                    m.logs = append(m.logs, "[FIDO2] No PIN - using key without PIN...")
-                } else {
-                    m.logs = append(m.logs, "[FIDO2] PIN set - registering resident key...")
-                }
                 m.state = stateRegistering
                 return m, registerCredential(m.devicePath, m.pin)
             } else if m.state == stateTouchDetected || m.state == stateError {
                 if m.registered {
-                    m.testCount++
                     m.state = stateWaitingForTouch
-                    m.touchStart = time.Now()
-                    m.logs = append(m.logs, fmt.Sprintf("[Test #%d] Authenticating...", m.testCount))
                     return m, waitForTouch(m.devicePath, m.pin)
                 } else {
                     m.state = stateDeviceCheck
-                    m.logs = append(m.logs, "[System] Restarting...")
                     return m, findDevice
                 }
             }
@@ -219,31 +188,29 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
     case deviceFoundMsg:
         m.devicePath = msg.path
-        m.logs = append(m.logs, fmt.Sprintf("[Device] Found: %s", msg.path))
-        m.logs = append(m.logs, "[FIDO2] Enter PIN or press ENTER...")
         m.state = statePINEntry
         m.pinInput = ""
         return m, nil
 
     case registrationSuccessMsg:
         m.registered = true
-        m.testCount = 1
-        m.logs = append(m.logs, "[SUCCESS] Credential registered!")
-        m.logs = append(m.logs, "[Test #1] First authentication...")
         m.state = stateWaitingForTouch
-        m.touchStart = time.Now()
         return m, waitForTouch(m.devicePath, m.pin)
 
     case touchSuccessMsg:
         m.state = stateTouchDetected
-        m.touchDuration = msg.duration
-        m.logs = append(m.logs, fmt.Sprintf("[SUCCESS] Touch #%d: %.2fs", m.testCount, msg.duration.Seconds()))
         return m, nil
 
     case errorMsg:
+        // Check if it's a "no credentials" error (key was swapped)
+        if strings.Contains(msg.err.Error(), "no credentials") {
+            // Key was swapped - reset and re-register
+            m.registered = false
+            m.state = stateDeviceCheck
+            return m, findDevice
+        }
         m.state = stateError
         m.err = msg.err
-        m.logs = append(m.logs, fmt.Sprintf("[ERROR] %v", msg.err))
         return m, nil
     }
 
@@ -251,14 +218,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) View() string {
-    s := titleStyle.Render("🔑 FIDO2 Touch Monitor v" + version) + "\n\n"
+    s := normalStyle.Render("🔑 FIDO2 Touch Monitor\n\n")
 
     switch m.state {
     case stateInit:
-        s += normalStyle.Render("Press ENTER to start touch timing tests\n\n")
+        s += normalStyle.Render("Press ENTER to start\n\n")
 
     case stateDeviceCheck:
-        s += warningStyle.Render("⏳ Checking for FIDO2 devices...\n\n")
+        s += normalStyle.Render("⏳ Checking for FIDO2 devices...\n\n")
 
     case statePINEntry:
         s += normalStyle.Render("Enter PIN (leave empty for no PIN):\n")
@@ -270,35 +237,21 @@ func (m model) View() string {
         s += normalStyle.Render("Press ENTER to continue\n\n")
 
     case stateRegistering:
-        s += warningStyle.Render("🔴 TOUCH KEY TO REGISTER 🔴\n\n")
+        s += normalStyle.Render("🔴 TOUCH KEY TO REGISTER 🔴\n\n")
 
     case stateWaitingForTouch:
-        elapsed := time.Since(m.touchStart).Seconds()
-        s += errorStyle.Render(fmt.Sprintf("🔴 TOUCH #%d - TOUCH NOW! 🔴", m.testCount)) + "\n"
-        s += warningStyle.Render(fmt.Sprintf("⏱️  %.1fs\n\n", elapsed))
+        s += errorStyle.Render("🔴 TOUCH NOW! 🔴\n\n")
 
     case stateTouchDetected:
-        s += successStyle.Render(fmt.Sprintf("✅ Touch #%d: %.2fs\n\n", m.testCount, m.touchDuration.Seconds()))
-        s += normalStyle.Render("Press ENTER to test again (hammer it!)\n\n")
+        s += successStyle.Render("✅ Touch detected!\n\n")
+        s += normalStyle.Render("Press ENTER to test again\n\n")
 
     case stateError:
         s += errorStyle.Render(fmt.Sprintf("❌ %v\n\n", m.err))
         s += normalStyle.Render("Press ENTER to retry\n\n")
     }
 
-    s += lipgloss.NewStyle().
-        Foreground(lipgloss.Color("240")).
-        Render("--- Timing Log ---\n")
-
-    start := 0
-    if len(m.logs) > 10 {
-        start = len(m.logs) - 10
-    }
-    for _, log := range m.logs[start:] {
-        s += normalStyle.Render(log + "\n")
-    }
-
-    s += "\n" + normalStyle.Render("'q' to quit")
+    s += normalStyle.Render("'q' to quit")
 
     return s
 }
